@@ -2,51 +2,79 @@ package com.example.lld.hashmap.map;
 
 import com.example.lld.hashmap.strategies.HashingStrategy;
 
-public class MyMap<K, V> implements IMap<K, V>{
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+public class MyConcurrentHashMap<K, V> implements IMap<K, V>{
     private static final int INITIAL_CAPACITY = 16;
 
     private static final double LOAD_FACTOR = 0.75;
 
-    private Node<K,V>[] nodeList = new Node[INITIAL_CAPACITY];
+    private volatile Node<K,V>[] nodeList = new Node[INITIAL_CAPACITY];
 
-    private int size = 0;
+    private ReentrantReadWriteLock[] locks = new ReentrantReadWriteLock[INITIAL_CAPACITY];
+
+    private ReentrantLock resizingLock = new ReentrantLock();
+
+    private AtomicBoolean isResizing = new AtomicBoolean(false);
+
+    private AtomicInteger size = new AtomicInteger(0);
 
     private final HashingStrategy<K> strategy;
 
-    public MyMap(HashingStrategy<K> strategy) {
+    public MyConcurrentHashMap(HashingStrategy<K> strategy) {
         this.strategy = strategy;
     }
 
     @Override
     public void put(K key, V value) {
         int index = strategy.computeHash(key, nodeList.length);
-        if(nodeList[index]==null){
-            Node<K, V> node = new Node<>(key, value);
-            nodeList[index] = node;
+        if(isResizing.get()){
+            Thread.yield();
         }
-        else {
-            Node<K, V> startingNode = nodeList[index];
-            Node<K, V> prevNode = startingNode;
-            while(startingNode!=null){
-                if(startingNode.key==key){
-                    startingNode.value = value;
-                    return;
-                }
-                prevNode = startingNode;
-                startingNode = startingNode.next;
+        locks[index].writeLock().lock();
+        try{
+            if(nodeList[index]==null){
+                Node<K, V> node = new Node<>(key, value);
+                nodeList[index] = node;
             }
-            prevNode.next = new Node<>(key, value);
+            else {
+                Node<K, V> startingNode = nodeList[index];
+                Node<K, V> prevNode = startingNode;
+                while(startingNode!=null){
+                    if(startingNode.key==key){
+                        startingNode.value = value;
+                        return;
+                    }
+                    prevNode = startingNode;
+                    startingNode = startingNode.next;
+                }
+                prevNode.next = new Node<>(key, value);
+            }
+            this.size.incrementAndGet();
         }
-        this.size++;
-        if(size >= (int)(nodeList.length*LOAD_FACTOR)){
-            resize();
+        finally {
+            locks[index].writeLock().unlock();
+        }
+        if (size.get() >= (int) (nodeList.length * LOAD_FACTOR)) {
+            resizingLock.lock();
+            try {
+                if (size.get() >= (int) (nodeList.length * LOAD_FACTOR) && isResizing.compareAndSet(false, true)) {
+                    resize();
+                    isResizing.set(false);
+                }
+            } finally {
+                resizingLock.unlock();
+            }
         }
     }
 
     @Override
     public V get(K key) {
         int index = strategy.computeHash(key, nodeList.length);
+        locks[index].readLock().lock();
         Node<K, V> node = nodeList[index];
         while(node!=null){
             if(node.key.equals(key)){
@@ -54,17 +82,22 @@ public class MyMap<K, V> implements IMap<K, V>{
             }
             node = node.next;
         }
+        locks[index].readLock().unlock();
         return null;
     }
 
     @Override
     public int size() {
-        return this.size;
+        return this.size.get();
     }
 
     @Override
     public void remove(K key) {
         int index = strategy.computeHash(key, nodeList.length);
+        if(isResizing.get()){
+            Thread.yield();
+        }
+        locks[index].writeLock().lock();
         Node<K, V> node = nodeList[index];
         Node<K, V> prev = null;
         while(node!=null){
@@ -83,17 +116,26 @@ public class MyMap<K, V> implements IMap<K, V>{
                 nodeList[index] = node.next;
                 node.next = null;
             }
-            size--;
+            size.decrementAndGet();
         }
+        locks[index].writeLock().unlock();
 
     }
 
     private void resize(){
+        if (size.get() < (int) (nodeList.length * LOAD_FACTOR)) {
+            return;
+        }
         int newSize = nodeList.length*2;
         Node<K,V>[] tempNodeList = new Node[newSize];
+        ReentrantReadWriteLock[] newLocks = new ReentrantReadWriteLock[newSize];
+
+        for(int i=0; i<newSize; i++){
+            newLocks[i] = new ReentrantReadWriteLock();
+        }
         //recompute the hashes and store
-        for (Node<K, V> kvNode : nodeList) {
-            Node<K, V> tempNode = kvNode;
+        for (int i=0; i<nodeList.length; i++) {
+            Node<K, V> tempNode = nodeList[i];
             while (tempNode != null) {
                 int index = strategy.computeHash(tempNode.key, newSize);
                 if (tempNodeList[index] != null) {
@@ -122,6 +164,4 @@ public class MyMap<K, V> implements IMap<K, V>{
             System.out.println();
         }
     }
-
-
 }

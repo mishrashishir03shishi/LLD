@@ -4,6 +4,11 @@ import com.example.lld.hashmap.map.MyMap;
 import com.example.lld.hashmap.strategies.HashingStrategy;
 import com.example.lld.hashmap.strategies.ObjectHashingStrategy;
 
+import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
+
 public class HashMapDriverPlatform {
 
     private static HashMapDriverPlatform instance;
@@ -72,8 +77,64 @@ public class HashMapDriverPlatform {
             }
         }
 
-        System.out.println("\nAll tests completed successfully.");
+        System.out.println("All tests completed successfully.");
 
 
     }
+
+
+    public void runConcurrentHashMap() throws InterruptedException {
+        final int NUM_THREADS = 5; // Number of concurrent threads
+        final int NUM_OPERATIONS = 100; // Operations per thread
+        final MyMap<Integer, String> myMap = new MyMap<>(new ObjectHashingStrategy<>());
+
+        ExecutorService executorService = Executors.newFixedThreadPool(NUM_THREADS);
+        AtomicInteger successfulGets = new AtomicInteger(0);
+        AtomicInteger successfulRemovals = new AtomicInteger(0);
+
+        System.out.println("🚀 Running small multi-threaded test...");
+
+        // Start multiple threads performing concurrent PUT, GET, REMOVE
+        for (int i = 0; i < NUM_THREADS; i++) {
+            int threadId = i; // Capture thread ID for debugging
+            executorService.execute(() -> {
+                for (int j = 0; j < NUM_OPERATIONS; j++) {
+                    int key = (threadId * 10) + (j % 10); // Ensure some overlap in keys
+                    String value = "Value" + key;
+
+                    if (j % 3 == 0) { // Put operation (33%)
+                        myMap.put(key, value);
+                        System.out.println(Thread.currentThread().getName() + " put " + key);
+                    } else if (j % 3 == 1) { // Get operation (33%)
+                        String result = myMap.get(key);
+                        if (result != null) {
+                            successfulGets.incrementAndGet();
+                        }
+                        System.out.println(Thread.currentThread().getName() + " got " + key + " -> " + result);
+                    } else { // Remove operation (33%)
+                        if (myMap.get(key) != null) {
+                            myMap.remove(key);
+                            successfulRemovals.incrementAndGet();
+                        }
+                        System.out.println(Thread.currentThread().getName() + " removed " + key);
+                    }
+                }
+            });
+        }
+
+        // Wait for all threads to complete
+        executorService.shutdown();
+        while (!executorService.isTerminated()) {
+            Thread.sleep(100);
+        }
+
+        // Final consistency checks
+        System.out.println("\n✅ Test Completed!");
+        System.out.println("Final Size of Map: " + myMap.size());
+        System.out.println("Successful GETs: " + successfulGets.get());
+        System.out.println("Successful REMOVEs: " + successfulRemovals.get());
+
+    }
+
+
 }

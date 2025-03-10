@@ -18,6 +18,7 @@ public class Main {
 //        RideManagementPlatform.run();
 //        CacheManagementPlatform.run();
 //        PaymentProcessingPlatform.getInstance().run();
-        HashMapDriverPlatform.getInstance().run();
+//        HashMapDriverPlatform.getInstance().run();
+        HashMapDriverPlatform.getInstance().runConcurrentHashMap();
     }
 }
