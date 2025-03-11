@@ -26,15 +26,26 @@ public class MyConcurrentHashMap<K, V> implements IMap<K, V>{
 
     public MyConcurrentHashMap(HashingStrategy<K> strategy) {
         this.strategy = strategy;
+        for(int i=0; i<INITIAL_CAPACITY; i++){
+            locks[i] = new ReentrantReadWriteLock();
+        }
     }
 
     @Override
     public void put(K key, V value) {
         int index = strategy.computeHash(key, nodeList.length);
-        if(isResizing.get()){
-            Thread.yield();
+        System.out.println(Thread.currentThread().getName() + " entered put operation : index " + index);
+        while(isResizing.get()){
+            try{
+                System.out.println(Thread.currentThread().getName() + " resizing going on in put : index " + index);
+                Thread.sleep(1);
+            }
+            catch (Exception e){
+                System.out.println(Thread.currentThread().getName() + " error while sleeping ");
+            }
         }
         locks[index].writeLock().lock();
+        System.out.println(Thread.currentThread().getName() + " acquired write lock for put : " + index);
         try{
             if(nodeList[index]==null){
                 Node<K, V> node = new Node<>(key, value);
@@ -56,16 +67,20 @@ public class MyConcurrentHashMap<K, V> implements IMap<K, V>{
             this.size.incrementAndGet();
         }
         finally {
+            System.out.println(Thread.currentThread().getName() + " releasing write lock for put : index " + index);
             locks[index].writeLock().unlock();
         }
         if (size.get() >= (int) (nodeList.length * LOAD_FACTOR)) {
+            System.out.println(Thread.currentThread().getName() + " resizing required ");
             resizingLock.lock();
+            System.out.println(Thread.currentThread().getName() + " acquired resizing lock ");
             try {
                 if (size.get() >= (int) (nodeList.length * LOAD_FACTOR) && isResizing.compareAndSet(false, true)) {
                     resize();
                     isResizing.set(false);
                 }
             } finally {
+                System.out.println(Thread.currentThread().getName() + " releasing resizing lock ");
                 resizingLock.unlock();
             }
         }
@@ -74,7 +89,9 @@ public class MyConcurrentHashMap<K, V> implements IMap<K, V>{
     @Override
     public V get(K key) {
         int index = strategy.computeHash(key, nodeList.length);
+        System.out.println(Thread.currentThread().getName() + " entered get operation : index " + index);
         locks[index].readLock().lock();
+        System.out.println(Thread.currentThread().getName() + " acquired reading lock : index " + index );
         Node<K, V> node = nodeList[index];
         while(node!=null){
             if(node.key.equals(key)){
@@ -82,6 +99,7 @@ public class MyConcurrentHashMap<K, V> implements IMap<K, V>{
             }
             node = node.next;
         }
+        System.out.println(Thread.currentThread().getName() + " releasing reading lock : index " + index);
         locks[index].readLock().unlock();
         return null;
     }
@@ -94,10 +112,18 @@ public class MyConcurrentHashMap<K, V> implements IMap<K, V>{
     @Override
     public void remove(K key) {
         int index = strategy.computeHash(key, nodeList.length);
-        if(isResizing.get()){
-            Thread.yield();
+        System.out.println(Thread.currentThread().getName() + " entered remove operation : index " + index);
+        while(isResizing.get()){
+            try{
+                System.out.println(Thread.currentThread().getName() + " resizing going on in put : index " + index);
+                Thread.sleep(1);
+            }
+            catch (Exception e){
+                System.out.println(Thread.currentThread().getName() + " error while sleeping ");
+            }
         }
         locks[index].writeLock().lock();
+        System.out.println(Thread.currentThread().getName() + " acquired write lock for remove : index " + index);
         Node<K, V> node = nodeList[index];
         Node<K, V> prev = null;
         while(node!=null){
@@ -118,6 +144,7 @@ public class MyConcurrentHashMap<K, V> implements IMap<K, V>{
             }
             size.decrementAndGet();
         }
+        System.out.println(Thread.currentThread().getName() + " releasing write lock for remove : index " + index);
         locks[index].writeLock().unlock();
 
     }
@@ -126,6 +153,7 @@ public class MyConcurrentHashMap<K, V> implements IMap<K, V>{
         if (size.get() < (int) (nodeList.length * LOAD_FACTOR)) {
             return;
         }
+        System.out.println(Thread.currentThread().getName() + " started resizing operation ");
         int newSize = nodeList.length*2;
         Node<K,V>[] tempNodeList = new Node[newSize];
         ReentrantReadWriteLock[] newLocks = new ReentrantReadWriteLock[newSize];
@@ -150,7 +178,8 @@ public class MyConcurrentHashMap<K, V> implements IMap<K, V>{
             }
         }
         nodeList = tempNodeList;
-
+        locks = newLocks;
+        System.out.println(Thread.currentThread().getName() + " completed resizing ");
     }
 
     public void print(){
